@@ -1,6 +1,6 @@
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -8,12 +8,25 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision as mp_vision
 
+from gesture_classifier import classify_gesture
+
 # Model bundle — downloaded on first run
 _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
     "gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
 )
 _MODEL_PATH = Path(__file__).parent / "gesture_recognizer.task"
+
+# Semantic label for each of the 21 MediaPipe hand landmarks.
+# Index in the list == landmark index returned by the model.
+_LM_LABELS: list[tuple[str, str]] = [
+    ("wrist",  "wrist"),
+    ("thumb",  "cmc"), ("thumb",  "mcp"), ("thumb",  "ip"),  ("thumb",  "tip"),
+    ("index",  "mcp"), ("index",  "pip"), ("index",  "dip"), ("index",  "tip"),
+    ("middle", "mcp"), ("middle", "pip"), ("middle", "dip"), ("middle", "tip"),
+    ("ring",   "mcp"), ("ring",   "pip"), ("ring",   "dip"), ("ring",   "tip"),
+    ("pinky",  "mcp"), ("pinky",  "pip"), ("pinky",  "dip"), ("pinky",  "tip"),
+]
 
 # Standard MediaPipe hand skeleton — 21 landmarks, fixed by the model spec
 _HAND_CONNECTIONS: frozenset[tuple[int, int]] = frozenset([
@@ -43,7 +56,7 @@ def _ensure_model() -> str:
 @dataclass
 class HandLandmarks:
     hand_label: str
-    landmarks: list[dict]  # [{"id": int, "x": float, "y": float}, ...]
+    landmarks: list[dict]  # [{"x", "y", "z", "finger", "joint"}, ...]  len==21
 
 
 @dataclass
@@ -51,6 +64,8 @@ class HandGesture:
     hand_label: str
     gesture: str
     confidence: float
+    pinch_distance: float = 0.0
+    flexion_angles: list[float] = field(default_factory=lambda: [0.0] * 5)
 
 
 class HandTracker:
@@ -85,19 +100,24 @@ class HandTracker:
             label = result.handedness[i][0].display_name  # "Left" or "Right"
 
             lm_list = [
-                {"id": j, "x": lm.x, "y": lm.y}
+                {
+                    "x": lm.x, "y": lm.y, "z": lm.z,
+                    "finger": _LM_LABELS[j][0],
+                    "joint":  _LM_LABELS[j][1],
+                }
                 for j, lm in enumerate(hand_lms)
             ]
             landmarks_list.append(HandLandmarks(hand_label=label, landmarks=lm_list))
 
-            if result.gestures and result.gestures[i]:
-                top = result.gestures[i][0]
-                gesture, confidence = top.category_name, top.score
-            else:
-                gesture, confidence = "None", 0.0
-
+            gesture, confidence, pinch_dist, flexions = classify_gesture(lm_list)
             gestures_list.append(
-                HandGesture(hand_label=label, gesture=gesture, confidence=confidence)
+                HandGesture(
+                    hand_label=label,
+                    gesture=gesture,
+                    confidence=confidence,
+                    pinch_distance=pinch_dist,
+                    flexion_angles=flexions,
+                )
             )
 
         return landmarks_list, gestures_list

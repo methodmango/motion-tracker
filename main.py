@@ -3,20 +3,24 @@ Hand tracking application with Foxglove WebSocket logging.
 
 Connect Foxglove Studio to ws://localhost:8765 to visualize and record data.
 Topics:
-  /hand/landmarks  — HandLandmarks (21 normalized 2D points per hand)
-  /hand/gesture    — HandGesture   (detected gesture + confidence)
+  /hand/landmarks  — HandLandmarks        (21 landmarks with x,y,z + finger/joint labels)
+  /hand/gesture    — HandGesture          (rule-based label, confidence, pinch distance, flexion angles)
+  /hand/markers    — foxglove.SceneUpdate (3D spheres + skeleton lines, colored per finger)
+  /camera/image    — foxglove.CompressedImage (JPEG-compressed webcam frame)
 
 Press 'q' in the preview window to quit.
 """
 
 import asyncio
+import base64
 import json
 import time
 
 import cv2
 from foxglove_websocket.server import FoxgloveServer
 
-from schemas import HAND_GESTURE_SCHEMA, HAND_LANDMARKS_SCHEMA
+from scene_builder import build_scene_update
+from schemas import COMPRESSED_IMAGE_SCHEMA, HAND_GESTURE_SCHEMA, HAND_LANDMARKS_SCHEMA, SCENE_UPDATE_SCHEMA
 from tracker import HandTracker
 
 
@@ -44,6 +48,22 @@ async def main() -> None:
                 "schema": json.dumps(HAND_GESTURE_SCHEMA),
             }
         )
+        markers_chan = await server.add_channel(
+            {
+                "topic": "/hand/markers",
+                "encoding": "json",
+                "schemaName": "foxglove.SceneUpdate",
+                "schema": json.dumps(SCENE_UPDATE_SCHEMA),
+            }
+        )
+        image_chan = await server.add_channel(
+            {
+                "topic": "/camera/image",
+                "encoding": "json",
+                "schemaName": "foxglove.CompressedImage",
+                "schema": json.dumps(COMPRESSED_IMAGE_SCHEMA),
+            }
+        )
 
         print("Foxglove WebSocket server: ws://localhost:8765")
         print("Open Foxglove Studio and connect to that address.")
@@ -59,14 +79,28 @@ async def main() -> None:
                 landmarks_list, gestures_list = tracker.process(frame)
                 timestamp_ns = time.time_ns()
 
+                ts = {"sec": timestamp_ns // 1_000_000_000, "nsec": timestamp_ns % 1_000_000_000}
+
                 for hand_lms in landmarks_list:
                     payload = json.dumps(
                         {
+                            "timestamp":  ts,
                             "hand_label": hand_lms.hand_label,
-                            "landmarks": hand_lms.landmarks,
+                            "landmarks":  hand_lms.landmarks,
                         }
                     ).encode()
                     await server.send_message(landmarks_chan, timestamp_ns, payload)
+
+                _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                image_payload = json.dumps(
+                    {
+                        "timestamp": ts,
+                        "frame_id":  "camera",
+                        "data":      base64.b64encode(jpeg_buf.tobytes()).decode(),
+                        "format":    "jpeg",
+                    }
+                ).encode()
+                await server.send_message(image_chan, timestamp_ns, image_payload)
 
                 for gesture in gestures_list:
                     payload = json.dumps(
@@ -74,9 +108,16 @@ async def main() -> None:
                             "hand_label": gesture.hand_label,
                             "gesture": gesture.gesture,
                             "confidence": gesture.confidence,
+                            "pinch_distance": gesture.pinch_distance,
+                            "flexion_angles": gesture.flexion_angles,
                         }
                     ).encode()
                     await server.send_message(gesture_chan, timestamp_ns, payload)
+
+                scene = build_scene_update(landmarks_list, timestamp_ns)
+                await server.send_message(
+                    markers_chan, timestamp_ns, json.dumps(scene).encode()
+                )
 
                 annotated = tracker.draw(frame, landmarks_list)
                 cv2.imshow("Hand Tracker (q to quit)", annotated)
