@@ -139,6 +139,48 @@ COMPRESSED_IMAGE_SCHEMA = {
     "required": ["timestamp", "frame_id", "data", "format"],
 }
 
+PINCH_DISTANCE_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "PinchDistance",
+    "type": "object",
+    "properties": {
+        "timestamp":  _time(),
+        "hand_label": {"type": "string"},
+        "value":      {"type": "number", "description": "Normalized thumb-tip to index-tip distance"},
+    },
+    "required": ["timestamp", "hand_label", "value"],
+}
+
+FINGER_ANGLES_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "FingerAngles",
+    "type": "object",
+    "properties": {
+        "timestamp":  _time(),
+        "hand_label": {"type": "string"},
+        "thumb":      {"type": "number", "description": "Flexion angle in degrees"},
+        "index":      {"type": "number", "description": "Flexion angle in degrees"},
+        "middle":     {"type": "number", "description": "Flexion angle in degrees"},
+        "ring":       {"type": "number", "description": "Flexion angle in degrees"},
+        "pinky":      {"type": "number", "description": "Flexion angle in degrees"},
+    },
+    "required": ["timestamp", "hand_label", "thumb", "index", "middle", "ring", "pinky"],
+}
+
+HAND_VELOCITY_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "HandVelocity",
+    "type": "object",
+    "properties": {
+        "timestamp":  _time(),
+        "hand_label": {"type": "string"},
+        "vx":         {"type": "number", "description": "Wrist x-velocity (normalized units/sec)"},
+        "vy":         {"type": "number", "description": "Wrist y-velocity (normalized units/sec)"},
+        "speed":      {"type": "number", "description": "Wrist speed magnitude (normalized units/sec)"},
+    },
+    "required": ["timestamp", "hand_label", "vx", "vy", "speed"],
+}
+
 HAND_GESTURE_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "HandGesture",
